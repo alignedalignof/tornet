@@ -2,8 +2,8 @@ tornet
 ======================
 Experiment with custom PyTorch models for recognizing functional SWToR UI elements (e.g close, need, greed buttons).
 
-[](mixed1.png)
-[](mixed2.png)
+![Example](mixed1.png)
+![Example](mixed2.png)
 
 Example output
 ------
