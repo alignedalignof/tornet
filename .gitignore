@@ -1,0 +1,7 @@
+__pycache__
+*.project
+*.cproject
+*.pydevproject
+.*/
+build
+
