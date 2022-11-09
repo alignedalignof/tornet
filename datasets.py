@@ -30,74 +30,55 @@ class TorData:
 
 class TorBgSet(Dataset):
     
-    def __init__(self, data, counts, size, stride):
+    def __init__(self, data, fg, counts, size, stride):
         self.counts = counts
-        self.cdf = [sum(counts[:i+1]) for i in range(len(counts))]
         self.data = data
+        self.fg = fg
         self.size, self.stride = size, stride
         
     def __len__(self):
-        return self.cdf[-1]
+        return sum(self.counts)
     
     def __getitem__(self, index):
-        label = sum([index >= m for m in self.cdf])
-        index = index % self.counts[label]
-        if label == 0:
-            return self.data.get_bg(index, self.size, self.stride), tr.tensor([1., 0.])
-        fg = label - 1
-        return self.data.get_fg(fg, index), tr.tensor([0., 1.])
+        label = int(index >= self.counts[0])
+        index = index - sum(self.counts[:label])
+        if label:
+            #x = self.data.get_fg(self.fg, index)
+            #plt.imshow(x.squeeze().permute(1, 2, 0))
+            #plt.show()
+            return self.data.get_fg(self.fg, index), tr.tensor([0., 1.])
+        return self.data.get_bg(index, self.size, self.stride), tr.tensor([1., 0.])
+
 
 class TorFgSet(Dataset):
 
-    def __init__(self, data, counts, sizes, stride, bgnet):
+    def __init__(self, data, fg, counts, bgnet, size):
         self.set_counts(counts)
         self.data = data
-        self.sizes = sizes
-        self.labels = data.fgcount + 1
-        self.bg = [[] for _ in sizes]
+        self.falsefg = []
+        self.fg = fg
         bgnet.eval()
         
-        def overlap(hit, x, y, span):
-            mask = tr.BoolTensor(len(hit))
-            for i, h in enumerate(hit):
-                tx = h[1].item()
-                ty = h[0].item()
-                mask[i] = tx >= x - span and tx < x + span and ty >= y - span and ty < y + span
-            return mask
-
-        with tr.no_grad():
-            for bg in data.bg:
-                for size, slot in zip(self.sizes, self.bg):
-                    points = {}
-                    fg = bgnet.nonbg(bg)
-                    for y, x in fg:
-                        y = fg[0, 0].item()
-                        x = fg[0, 1].item()
-                        sub = bg[:, max(0, y - size):(y + size), max(0, x - size):x + size]
-                        sub = sub.unfold(1, size, stride).unfold(2, size, stride)
-                        for h in range(sub.shape[1]):
-                            for w in range(sub.shape[2]):
-                                if (y + w, x + h) in points:
-                                    continue
-                                points[(y + w, x + h)] = 1
-                                slot.append(sub[:,h,w, :,:].squeeze())
+        h, w = size
+        for bg in data.bg:
+            for y, x in bgnet.nonbg(bg, 0.01):
+                for dx in [-5, -2, 0, 2, 5]:
+                    for dy in [-5, -2, 0, 2, 5]:
+                        i, j = y + dy, x + dx
+                        falsefg = bg[:,i:i+h, j:j+w]
+                        if falsefg.shape[1] == h and falsefg.shape[2] == w:
+                            self.falsefg.append(falsefg)
     
     def set_counts(self, counts):
         self.counts = counts
-        self.cdf = [sum(counts[:i+1]) for i in range(len(counts))]
         
     def __len__(self):
-        return self.cdf[-1]
+        return sum(self.counts)
     
     def __getitem__(self, index):
-        label = sum(index >= m for m in self.cdf)
-        index = index % self.counts[label]
-        onehot = tr.zeros(len(self.counts))
-        onehot[label] = 1
-        if label == 0:
-            slot = index % len(self.sizes)
-            index = (index // len(self.sizes)) % len(self.bg[slot])
-            return self.bg[slot][index], onehot
-        fg = label- 1
-        return self.data.get_fg(fg, index), onehot
+        label = int(index >= self.counts[0])
+        index = index - sum(self.counts[:label])
+        if label:
+            return self.data.get_fg(self.fg, index), tr.tensor([0., 1.])
+        return self.falsefg[index % len(self.falsefg)], tr.tensor([1., 0.])
     
